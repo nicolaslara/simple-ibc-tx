@@ -35,7 +35,7 @@ use url::Url;
 use masp_primitives::{
     sapling::redjubjub,
     transaction::components::sapling::builder::RngBuildParams,
-    zip32::{ExtendedSpendingKey as MaspExtendedSpendingKey, PseudoExtendedKey},
+    zip32::{ExtendedKey, ExtendedSpendingKey as MaspExtendedSpendingKey, PseudoExtendedKey},
 };
 
 // Import StoredBuildParams
@@ -307,7 +307,7 @@ async fn perform_masp_sync(
 /// Build IBC unshielding transaction (Steps 1-7) - Can be done unsecurely
 async fn build_ibc_unshielding_tx(
     sdk: &NamadaImpl<HttpClient, FsWalletUtils, FsShieldedUtils, NullIo>,
-    xsk: ExtendedSpendingKey,
+    pxk: PseudoExtendedKey,
     rpc_url: String,
     wrapper_public_key: namada_core::key::common::PublicKey,
 ) -> Result<(
@@ -315,57 +315,14 @@ async fn build_ibc_unshielding_tx(
     namada_sdk::signing::SigningTxData,
     StoredBuildParams,
 )> {
-    info!("🚀 Building IBC Unshielding Transaction (Steps 1-7)");
-    println!("=============================================");
-    println!("This mimics the exact flow from namada-interface PR #2235");
+    info!("🚀 Building IBC Unshielding Transaction");
+    println!("=======================================");
+    println!("Building transaction with provided PseudoExtendedKey");
     println!();
 
-    // Step 1: Check MASP parameters
-    println!("📋 Step 1: Check MASP parameters [{}]", get_timestamp());
-    if !check_masp_params_exist()? {
-        return Err(anyhow!(
-            "MASP parameters not found. Please copy them to ./masp-params/"
-        ));
-    }
-    println!("   ✅ MASP params verified");
-
-    // Step 2: Create PseudoExtendedKey from provided xsk
+    // Step 1: Build IBC transfer transaction
     println!(
-        "📋 Step 2: Create PseudoExtendedKey from provided xsk [{}]",
-        get_timestamp()
-    );
-
-    // Create PseudoExtendedKey and replace ask with fake one (same as JS)
-    let masp_xsk = MaspExtendedSpendingKey::from(xsk);
-    let mut pxk = PseudoExtendedKey::from(masp_xsk);
-
-    // Critical: Replace spend authorizing key with fake one (same as JS)
-    pxk.augment_spend_authorizing_key_unchecked(redjubjub::PrivateKey(
-        masp_primitives::jubjub::Fr::default(),
-    ));
-
-    println!("   🔧 Created PseudoExtendedKey with fake spend authorization key");
-    println!("   ✅ Spend authorization key replaced with Fr::default()");
-    println!();
-
-    // Step 3: Perform MASP sync
-    println!("📋 Step 3: Perform MASP sync [{}]", get_timestamp());
-
-    // Create viewing key for sync
-    #[allow(deprecated)]
-    let extended_full_viewing_key = masp_xsk.to_extended_full_viewing_key();
-    let extended_viewing_key =
-        namada_core::masp::ExtendedViewingKey::from(extended_full_viewing_key);
-    let viewing_key_str = extended_viewing_key.to_string();
-
-    perform_masp_sync(sdk, viewing_key_str).await?;
-
-    println!("   ✅ MASP sync completed");
-    println!();
-
-    // Step 4: Build IBC transfer transaction
-    println!(
-        "📋 Step 4: Build IBC transfer transaction [{}]",
+        "📋 Step 1: Build IBC transfer transaction [{}]",
         get_timestamp()
     );
 
@@ -425,8 +382,8 @@ async fn build_ibc_unshielding_tx(
 
     println!("   ✅ IBC transfer arguments created (matching JS example)");
 
-    // Step 5: Build transaction
-    println!("📋 Step 5: Build transaction [{}]", get_timestamp());
+    // Step 2: Build transaction
+    println!("📋 Step 2: Build transaction [{}]", get_timestamp());
 
     // Create build parameters with randomness
     let mut build_params = RngBuildParams::new(OsRng);
@@ -531,12 +488,34 @@ async fn main() -> Result<()> {
     // Initialize logging
     tracing_subscriber::fmt::init();
 
+    // Check MASP parameters first
+    println!("📋 Check MASP parameters [{}]", get_timestamp());
+    if !check_masp_params_exist()? {
+        return Err(anyhow!(
+            "MASP parameters not found. Please copy them to ./masp-params/"
+        ));
+    }
+    println!("   ✅ MASP params verified");
+    println!();
+
     // Setup ExtendedSpendingKey (exact same as JS example)
     println!("🔑 Setting up ExtendedSpendingKey from JS example");
     let xsk_str = "zsknam1qwkg258pqqqqpqypad9vytjs2j70eqak3fmuexhay8q3j560wjy0f6y5xe0zqlx5wkzzxnuk4y3pjyv0sexcrtevfldms9xy3mmq9erfmd7p5k85ddjs5nn7c3xg0e9mj3dkxt82sqjyuun7tvh8y3w0arup9mwwe4qugpsvlm995y49ej0gvs5ps7q2sdpru2vcjqdzzg2g6sx0cj6c789adffv2hz2l5xfjpvzlfqa55s3d4807chkjdq0vsllckyx4vnjd3ysmtg0mtuex";
     let xsk =
         ExtendedSpendingKey::from_str(xsk_str).context("Failed to parse ExtendedSpendingKey")?;
     println!("   ✅ Extended spending key parsed successfully");
+
+    // Create PseudoExtendedKey and replace ask with fake one (same as JS)
+    println!("🔧 Creating PseudoExtendedKey with fake spend authorization key");
+    let masp_xsk = MaspExtendedSpendingKey::from(xsk);
+    let mut pxk = PseudoExtendedKey::from(masp_xsk);
+
+    // Critical: Replace spend authorizing key with fake one (same as JS)
+    pxk.augment_spend_authorizing_key_unchecked(redjubjub::PrivateKey(
+        masp_primitives::jubjub::Fr::default(),
+    ));
+    println!("   ✅ Spend authorization key replaced with Fr::default()");
+    println!();
 
     // Setup RPC URL
     let rpc_url = "https://namada-rpc.emberstake.xyz".to_string();
@@ -547,8 +526,7 @@ async fn main() -> Result<()> {
     println!("📋 Initialize SDK [{}]", get_timestamp());
     println!("   RPC URL: {rpc_url}");
 
-    // Create viewing key for wallet ID
-    let masp_xsk = MaspExtendedSpendingKey::from(xsk);
+    // Create viewing key for wallet ID (derive from the real xsk for wallet ID)
     #[allow(deprecated)]
     let extended_full_viewing_key = masp_xsk.to_extended_full_viewing_key();
     let extended_viewing_key =
@@ -573,9 +551,24 @@ async fn main() -> Result<()> {
     println!("   🔑 Public key: {wrapper_public_key}");
     println!();
 
+    // Perform MASP sync
+    println!("📋 Perform MASP sync [{}]", get_timestamp());
+    println!("This mimics the exact flow from namada-interface PR #2235");
+    println!();
+
+    // Create viewing key for sync (derive from the PseudoExtendedKey)
+    let extended_full_viewing_key = pxk.to_viewing_key();
+    let extended_viewing_key =
+        namada_core::masp::ExtendedViewingKey::from(extended_full_viewing_key);
+    let viewing_key_str = extended_viewing_key.to_string();
+
+    perform_masp_sync(&sdk, viewing_key_str).await?;
+    println!("   ✅ MASP sync completed");
+    println!();
+
     // Step 1: Build IBC unshielding transaction (unsecured)
     let (tx, signing_data, stored_build_params) =
-        build_ibc_unshielding_tx(&sdk, xsk, rpc_url.clone(), wrapper_public_key).await?;
+        build_ibc_unshielding_tx(&sdk, pxk, rpc_url.clone(), wrapper_public_key).await?;
 
     // Step 2: Sign transaction - both MASP and wrapper (secured)
     let tx = sign_tx(
