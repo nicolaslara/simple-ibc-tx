@@ -1,9 +1,9 @@
 use anyhow::{anyhow, Context, Result};
+use chrono::{DateTime, Local};
 use namada_core::{
     address::Address,
     chain::ChainId,
     ibc::core::host::types::identifiers::{ChannelId, PortId},
-    key::common::SecretKey,
     masp::TransferSource,
 };
 use namada_sdk::{
@@ -92,6 +92,27 @@ fn create_wallet_id_from_viewing_key(viewing_key: &str) -> String {
     viewing_key.hash(&mut hasher);
     let hash = hasher.finish();
     format!("wallet_{hash:x}")
+}
+
+/// Generate a disposable signing key and return both the secret key and public key
+async fn gen_disposable_signing_key_pair(
+    context: &impl Namada,
+) -> (
+    namada_core::key::common::SecretKey,
+    namada_core::key::common::PublicKey,
+) {
+    let secret_key = context
+        .wallet_mut()
+        .await
+        .gen_disposable_signing_key(&mut OsRng);
+    let public_key = secret_key.to_public();
+    (secret_key, public_key)
+}
+
+/// Get current timestamp in readable format
+fn get_timestamp() -> String {
+    let now: DateTime<Local> = Local::now();
+    now.format("%H:%M:%S%.3f").to_string()
 }
 
 /// Simple function to initialize Namada SDK
@@ -289,7 +310,7 @@ async fn run_js_example_port() -> Result<()> {
     println!();
 
     // Step 1: Check MASP parameters
-    println!("📋 Step 1: Check MASP parameters");
+    println!("📋 Step 1: Check MASP parameters [{}]", get_timestamp());
     if !check_masp_params_exist()? {
         return Err(anyhow!(
             "MASP parameters not found. Please copy them to ./masp-params/"
@@ -298,18 +319,15 @@ async fn run_js_example_port() -> Result<()> {
     println!("   ✅ MASP params verified");
 
     // Step 2: Setup the hardcoded ExtendedSpendingKey (exact same as JS)
-    println!("📋 Step 2: Setup ExtendedSpendingKey (exact same as JS example)");
+    println!(
+        "📋 Step 2: Setup ExtendedSpendingKey (exact same as JS example) [{}]",
+        get_timestamp()
+    );
 
     let xsk_str = "zsknam1qwkg258pqqqqpqypad9vytjs2j70eqak3fmuexhay8q3j560wjy0f6y5xe0zqlx5wkzzxnuk4y3pjyv0sexcrtevfldms9xy3mmq9erfmd7p5k85ddjs5nn7c3xg0e9mj3dkxt82sqjyuun7tvh8y3w0arup9mwwe4qugpsvlm995y49ej0gvs5ps7q2sdpru2vcjqdzzg2g6sx0cj6c789adffv2hz2l5xfjpvzlfqa55s3d4807chkjdq0vsllckyx4vnjd3ysmtg0mtuex";
-    let wrapper_signing_key_hex =
-        "00b43cfa6290e7d3c5e651cdd8f385b8fb1178bcc03bbea4b030ac03e17ced359c";
 
     println!("   🔑 Using hardcoded ExtendedSpendingKey from JS example");
     println!("   🔑 Extended spending key: zsknam1qwkg258pqqqqpq...");
-    println!(
-        "   🔑 Wrapper signing key: {}...",
-        &wrapper_signing_key_hex[..16]
-    );
 
     // Parse the extended spending key (same as JS)
     let xsk =
@@ -329,7 +347,7 @@ async fn run_js_example_port() -> Result<()> {
     println!();
 
     // Step 3: Initialize SDK with simple function
-    println!("📋 Step 3: Initialize SDK");
+    println!("📋 Step 3: Initialize SDK [{}]", get_timestamp());
 
     let rpc_url = "https://namada-rpc.emberstake.xyz";
     println!("   RPC URL: {rpc_url}");
@@ -341,6 +359,9 @@ async fn run_js_example_port() -> Result<()> {
         namada_core::masp::ExtendedViewingKey::from(extended_full_viewing_key);
     let viewing_key_str = extended_viewing_key.to_string();
 
+    // print the viewing key
+    println!("   🔑 Viewing key: {viewing_key_str}");
+
     // Create wallet ID from viewing key
     let wallet_id = create_wallet_id_from_viewing_key(&viewing_key_str);
 
@@ -349,24 +370,33 @@ async fn run_js_example_port() -> Result<()> {
 
     println!("   ✅ Namada SDK initialized successfully");
 
-    // Step 4: Perform MASP sync
-    println!("📋 Step 4: Perform MASP sync");
+    // Step 4: Generate disposable wrapper signing key
+    println!(
+        "📋 Step 4: Generate disposable wrapper signing key [{}]",
+        get_timestamp()
+    );
+
+    let (wrapper_secret_key, wrapper_public_key) = gen_disposable_signing_key_pair(&sdk).await;
+    println!("   🔑 Generated disposable wrapper signing key");
+    println!("   🔑 Public key: {wrapper_public_key}");
+    println!();
+
+    // Step 5: Perform MASP sync
+    println!("📋 Step 5: Perform MASP sync [{}]", get_timestamp());
 
     perform_masp_sync(&sdk, viewing_key_str).await?;
 
     println!("   ✅ MASP sync completed");
     println!();
 
-    // Step 5: Build IBC transfer transaction
-    println!("📋 Step 5: Build IBC transfer transaction");
+    // Step 6: Build IBC transfer transaction
+    println!(
+        "📋 Step 6: Build IBC transfer transaction [{}]",
+        get_timestamp()
+    );
 
     // Get native token address
     let native_token_address = get_native_token_address()?;
-
-    // Parse wrapper signing key and get public key for fee payer
-    let wrapper_secret_key = SecretKey::from_str(wrapper_signing_key_hex)
-        .context("Failed to parse wrapper signing key")?;
-    let wrapper_public_key = wrapper_secret_key.to_public();
 
     // Create transaction arguments (same structure as JS but with proper types)
     let tx_args = TxIbcTransfer {
@@ -421,8 +451,8 @@ async fn run_js_example_port() -> Result<()> {
 
     println!("   ✅ IBC transfer arguments created (matching JS example)");
 
-    // Step 6: Build transaction
-    println!("📋 Step 6: Build transaction");
+    // Step 7: Build transaction
+    println!("📋 Step 7: Build transaction [{}]", get_timestamp());
 
     // Create build parameters
     let mut build_params = RngBuildParams::new(OsRng);
@@ -437,8 +467,8 @@ async fn run_js_example_port() -> Result<()> {
     println!("   📊 Transaction size: {} bytes", tx.to_bytes().len());
     println!();
 
-    // Step 7: Sign MASP components (using real software signing)
-    println!("📋 Step 7: Sign MASP components");
+    // Step 8: Sign MASP components (using real software signing)
+    println!("📋 Step 8: Sign MASP components [{}]", get_timestamp());
 
     // Call the real software-based masp_sign function
     match masp_sign(&mut tx, &signing_data, build_params, xsk).await {
@@ -452,8 +482,8 @@ async fn run_js_example_port() -> Result<()> {
     }
     println!();
 
-    // Step 8: Sign wrapper transaction (same as JS)
-    println!("📋 Step 8: Sign wrapper transaction");
+    // Step 9: Sign wrapper transaction (same as JS)
+    println!("📋 Step 9: Sign wrapper transaction [{}]", get_timestamp());
 
     // Sign raw transaction if account public keys map is available
     if let Some(account_public_keys_map) = signing_data.account_public_keys_map.clone() {
@@ -470,8 +500,8 @@ async fn run_js_example_port() -> Result<()> {
     println!("   ✅ Wrapper transaction signed");
     println!();
 
-    // Step 9: Broadcast transaction (same as JS)
-    println!("📋 Step 9: Broadcast transaction");
+    // Step 10: Broadcast transaction (same as JS)
+    println!("📋 Step 10: Broadcast transaction [{}]", get_timestamp());
 
     let rpc_url_parsed = tendermint_rpc::Url::from_str(rpc_url).context("Invalid RPC URL")?;
     let client = HttpClient::new(rpc_url_parsed)?;
