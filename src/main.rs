@@ -38,6 +38,9 @@ use masp_primitives::{
     zip32::{ExtendedSpendingKey as MaspExtendedSpendingKey, PseudoExtendedKey},
 };
 
+// Import StoredBuildParams
+use masp_primitives::transaction::components::sapling::builder::StoredBuildParams;
+
 // Additional imports for masp_sign function
 // (HashMap no longer needed since we're using direct xsk approach)
 
@@ -301,11 +304,19 @@ async fn perform_masp_sync(
     Ok(())
 }
 
-/// Port of the JavaScript example from PR #2235
-/// This follows the exact same flow as the JS code but uses simple helper functions
-async fn run_js_example_port() -> Result<()> {
-    info!("🚀 Running JavaScript Example Port");
-    println!("==================================");
+/// Build IBC unshielding transaction (Steps 1-7) - Can be done unsecurely
+async fn build_ibc_unshielding_tx(
+    sdk: &NamadaImpl<HttpClient, FsWalletUtils, FsShieldedUtils, NullIo>,
+    xsk: ExtendedSpendingKey,
+    rpc_url: String,
+    wrapper_public_key: namada_core::key::common::PublicKey,
+) -> Result<(
+    namada_tx::Tx,
+    namada_sdk::signing::SigningTxData,
+    StoredBuildParams,
+)> {
+    info!("🚀 Building IBC Unshielding Transaction (Steps 1-7)");
+    println!("=============================================");
     println!("This mimics the exact flow from namada-interface PR #2235");
     println!();
 
@@ -318,20 +329,11 @@ async fn run_js_example_port() -> Result<()> {
     }
     println!("   ✅ MASP params verified");
 
-    // Step 2: Setup the hardcoded ExtendedSpendingKey (exact same as JS)
+    // Step 2: Create PseudoExtendedKey from provided xsk
     println!(
-        "📋 Step 2: Setup ExtendedSpendingKey (exact same as JS example) [{}]",
+        "📋 Step 2: Create PseudoExtendedKey from provided xsk [{}]",
         get_timestamp()
     );
-
-    let xsk_str = "zsknam1qwkg258pqqqqpqypad9vytjs2j70eqak3fmuexhay8q3j560wjy0f6y5xe0zqlx5wkzzxnuk4y3pjyv0sexcrtevfldms9xy3mmq9erfmd7p5k85ddjs5nn7c3xg0e9mj3dkxt82sqjyuun7tvh8y3w0arup9mwwe4qugpsvlm995y49ej0gvs5ps7q2sdpru2vcjqdzzg2g6sx0cj6c789adffv2hz2l5xfjpvzlfqa55s3d4807chkjdq0vsllckyx4vnjd3ysmtg0mtuex";
-
-    println!("   🔑 Using hardcoded ExtendedSpendingKey from JS example");
-    println!("   🔑 Extended spending key: zsknam1qwkg258pqqqqpq...");
-
-    // Parse the extended spending key (same as JS)
-    let xsk =
-        ExtendedSpendingKey::from_str(xsk_str).context("Failed to parse ExtendedSpendingKey")?;
 
     // Create PseudoExtendedKey and replace ask with fake one (same as JS)
     let masp_xsk = MaspExtendedSpendingKey::from(xsk);
@@ -346,11 +348,8 @@ async fn run_js_example_port() -> Result<()> {
     println!("   ✅ Spend authorization key replaced with Fr::default()");
     println!();
 
-    // Step 3: Initialize SDK with simple function
-    println!("📋 Step 3: Initialize SDK [{}]", get_timestamp());
-
-    let rpc_url = "https://namada-rpc.emberstake.xyz";
-    println!("   RPC URL: {rpc_url}");
+    // Step 3: Perform MASP sync
+    println!("📋 Step 3: Perform MASP sync [{}]", get_timestamp());
 
     // Create viewing key for sync
     #[allow(deprecated)]
@@ -359,39 +358,14 @@ async fn run_js_example_port() -> Result<()> {
         namada_core::masp::ExtendedViewingKey::from(extended_full_viewing_key);
     let viewing_key_str = extended_viewing_key.to_string();
 
-    // print the viewing key
-    println!("   🔑 Viewing key: {viewing_key_str}");
-
-    // Create wallet ID from viewing key
-    let wallet_id = create_wallet_id_from_viewing_key(&viewing_key_str);
-
-    // Initialize SDK
-    let sdk = initialize_sdk(rpc_url.to_string(), Some(wallet_id)).await?;
-
-    println!("   ✅ Namada SDK initialized successfully");
-
-    // Step 4: Generate disposable wrapper signing key
-    println!(
-        "📋 Step 4: Generate disposable wrapper signing key [{}]",
-        get_timestamp()
-    );
-
-    let (wrapper_secret_key, wrapper_public_key) = gen_disposable_signing_key_pair(&sdk).await;
-    println!("   🔑 Generated disposable wrapper signing key");
-    println!("   🔑 Public key: {wrapper_public_key}");
-    println!();
-
-    // Step 5: Perform MASP sync
-    println!("📋 Step 5: Perform MASP sync [{}]", get_timestamp());
-
-    perform_masp_sync(&sdk, viewing_key_str).await?;
+    perform_masp_sync(sdk, viewing_key_str).await?;
 
     println!("   ✅ MASP sync completed");
     println!();
 
-    // Step 6: Build IBC transfer transaction
+    // Step 4: Build IBC transfer transaction
     println!(
-        "📋 Step 6: Build IBC transfer transaction [{}]",
+        "📋 Step 4: Build IBC transfer transaction [{}]",
         get_timestamp()
     );
 
@@ -451,27 +425,44 @@ async fn run_js_example_port() -> Result<()> {
 
     println!("   ✅ IBC transfer arguments created (matching JS example)");
 
-    // Step 7: Build transaction
-    println!("📋 Step 7: Build transaction [{}]", get_timestamp());
+    // Step 5: Build transaction
+    println!("📋 Step 5: Build transaction [{}]", get_timestamp());
 
-    // Create build parameters
+    // Create build parameters with randomness
     let mut build_params = RngBuildParams::new(OsRng);
 
     // Build the transaction
-    let (mut tx, signing_data, _masp_epoch) =
-        namada_sdk::tx::build_ibc_transfer(&sdk, &tx_args, &mut build_params)
+    let (tx, signing_data, _masp_epoch) =
+        namada_sdk::tx::build_ibc_transfer(sdk, &tx_args, &mut build_params)
             .await
             .context("Failed to build IBC transfer")?;
 
+    // Store the build parameters to preserve randomness
+    let stored_build_params = build_params
+        .to_stored()
+        .ok_or_else(|| anyhow!("Failed to store build parameters"))?;
+
     println!("   ✅ IBC transfer built successfully!");
     println!("   📊 Transaction size: {} bytes", tx.to_bytes().len());
+    println!("   🎲 Build parameters stored for signing");
     println!();
 
-    // Step 8: Sign MASP components (using real software signing)
+    Ok((tx, signing_data, stored_build_params))
+}
+
+/// Sign transaction - both MASP and wrapper (Steps 8-9) - Needs to be done securely
+async fn sign_tx(
+    mut tx: namada_tx::Tx,
+    xsk: ExtendedSpendingKey,
+    wrapper_secret_key: namada_core::key::common::SecretKey,
+    signing_data: &namada_sdk::signing::SigningTxData,
+    stored_build_params: StoredBuildParams,
+) -> Result<namada_tx::Tx> {
+    // Step 8: Sign MASP components
     println!("📋 Step 8: Sign MASP components [{}]", get_timestamp());
 
-    // Call the real software-based masp_sign function
-    match masp_sign(&mut tx, &signing_data, build_params, xsk).await {
+    // Use the stored build parameters to preserve randomness
+    match masp_sign(&mut tx, signing_data, stored_build_params, xsk).await {
         Ok(()) => {
             println!("   ✅ MASP components signed successfully");
         }
@@ -482,7 +473,7 @@ async fn run_js_example_port() -> Result<()> {
     }
     println!();
 
-    // Step 9: Sign wrapper transaction (same as JS)
+    // Step 9: Sign wrapper transaction
     println!("📋 Step 9: Sign wrapper transaction [{}]", get_timestamp());
 
     // Sign raw transaction if account public keys map is available
@@ -500,10 +491,14 @@ async fn run_js_example_port() -> Result<()> {
     println!("   ✅ Wrapper transaction signed");
     println!();
 
-    // Step 10: Broadcast transaction (same as JS)
+    Ok(tx)
+}
+
+/// Broadcast transaction (Step 10) - Can be done unsecurely
+async fn broadcast(tx: namada_tx::Tx, rpc_url: String) -> Result<()> {
     println!("📋 Step 10: Broadcast transaction [{}]", get_timestamp());
 
-    let rpc_url_parsed = tendermint_rpc::Url::from_str(rpc_url).context("Invalid RPC URL")?;
+    let rpc_url_parsed = tendermint_rpc::Url::from_str(&rpc_url).context("Invalid RPC URL")?;
     let client = HttpClient::new(rpc_url_parsed)?;
     println!("   🚀 Broadcasting to: {rpc_url}");
 
@@ -536,6 +531,64 @@ async fn main() -> Result<()> {
     // Initialize logging
     tracing_subscriber::fmt::init();
 
-    // Run the JavaScript example port
-    run_js_example_port().await
+    // Setup ExtendedSpendingKey (exact same as JS example)
+    println!("🔑 Setting up ExtendedSpendingKey from JS example");
+    let xsk_str = "zsknam1qwkg258pqqqqpqypad9vytjs2j70eqak3fmuexhay8q3j560wjy0f6y5xe0zqlx5wkzzxnuk4y3pjyv0sexcrtevfldms9xy3mmq9erfmd7p5k85ddjs5nn7c3xg0e9mj3dkxt82sqjyuun7tvh8y3w0arup9mwwe4qugpsvlm995y49ej0gvs5ps7q2sdpru2vcjqdzzg2g6sx0cj6c789adffv2hz2l5xfjpvzlfqa55s3d4807chkjdq0vsllckyx4vnjd3ysmtg0mtuex";
+    let xsk =
+        ExtendedSpendingKey::from_str(xsk_str).context("Failed to parse ExtendedSpendingKey")?;
+    println!("   ✅ Extended spending key parsed successfully");
+
+    // Setup RPC URL
+    let rpc_url = "https://namada-rpc.emberstake.xyz".to_string();
+    println!("🌐 Using RPC URL: {rpc_url}");
+    println!();
+
+    // Initialize SDK
+    println!("📋 Initialize SDK [{}]", get_timestamp());
+    println!("   RPC URL: {rpc_url}");
+
+    // Create viewing key for wallet ID
+    let masp_xsk = MaspExtendedSpendingKey::from(xsk);
+    #[allow(deprecated)]
+    let extended_full_viewing_key = masp_xsk.to_extended_full_viewing_key();
+    let extended_viewing_key =
+        namada_core::masp::ExtendedViewingKey::from(extended_full_viewing_key);
+    let viewing_key_str = extended_viewing_key.to_string();
+    println!("   🔑 Viewing key: {viewing_key_str}");
+
+    // Create wallet ID from viewing key
+    let wallet_id = create_wallet_id_from_viewing_key(&viewing_key_str);
+
+    // Initialize SDK
+    let sdk = initialize_sdk(rpc_url.clone(), Some(wallet_id)).await?;
+    println!("   ✅ Namada SDK initialized successfully");
+
+    // Generate disposable wrapper signing key
+    println!(
+        "📋 Generate disposable wrapper signing key [{}]",
+        get_timestamp()
+    );
+    let (wrapper_secret_key, wrapper_public_key) = gen_disposable_signing_key_pair(&sdk).await;
+    println!("   🔑 Generated disposable wrapper signing key");
+    println!("   🔑 Public key: {wrapper_public_key}");
+    println!();
+
+    // Step 1: Build IBC unshielding transaction (unsecured)
+    let (tx, signing_data, stored_build_params) =
+        build_ibc_unshielding_tx(&sdk, xsk, rpc_url.clone(), wrapper_public_key).await?;
+
+    // Step 2: Sign transaction - both MASP and wrapper (secured)
+    let tx = sign_tx(
+        tx,
+        xsk,
+        wrapper_secret_key,
+        &signing_data,
+        stored_build_params,
+    )
+    .await?;
+
+    // Step 3: Broadcast transaction (unsecured)
+    broadcast(tx, rpc_url).await?;
+
+    Ok(())
 }
