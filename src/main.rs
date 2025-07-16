@@ -39,7 +39,7 @@ use masp_primitives::{
 };
 
 // Additional imports for masp_sign function
-use std::collections::HashMap;
+// (HashMap no longer needed since we're using direct xsk approach)
 
 // Module declarations
 mod masp_sign;
@@ -437,14 +437,11 @@ async fn run_js_example_port() -> Result<()> {
     println!("   📊 Transaction size: {} bytes", tx.to_bytes().len());
     println!();
 
-    // Step 7: Sign MASP components (using copied masp_sign function)
+    // Step 7: Sign MASP components (using real software signing)
     println!("📋 Step 7: Sign MASP components");
 
-    // Create empty hardware wallet keys map (since we're not using hardware wallet)
-    let shielded_hw_keys: HashMap<String, namada_core::masp::ExtendedViewingKey> = HashMap::new();
-
-    // Call the copied masp_sign function
-    match masp_sign(&mut tx, &tx_args.tx, &signing_data, shielded_hw_keys).await {
+    // Call the real software-based masp_sign function
+    match masp_sign(&mut tx, &signing_data, build_params, xsk).await {
         Ok(()) => {
             println!("   ✅ MASP components signed successfully");
         }
