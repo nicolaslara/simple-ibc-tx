@@ -559,7 +559,6 @@ async fn main() -> Result<()> {
 
     // Perform MASP sync (early to ensure synced state)
     println!("📋 Perform MASP sync [{}]", get_timestamp());
-    println!("This mimics the exact flow from namada-interface PR #2235");
     println!();
 
     perform_masp_sync(&sdk, viewing_key_str).await?;
